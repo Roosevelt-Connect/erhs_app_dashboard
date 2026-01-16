@@ -7,6 +7,35 @@ import 'bootstrap/dist/css/bootstrap.min.css';
 import {
   Container, Row, Col, Card, Button, Spinner, Form, Modal, Nav
 } from 'react-bootstrap';
+import { query, where } from "firebase/firestore";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+
+
+const getTeacherUseCount = async (teacherName, startDate, endDate) => {
+  const collectionRef = collection(db, "student_check-in_datalogs");
+  const q = query(
+    collectionRef,
+    where("teacher", "==", teacherName),
+    where("timestamp", ">=", startDate),
+    where("timestamp", "<=", endDate)
+  );
+  try {
+    const snapshot = await getDocs(q);
+    return snapshot.size;
+  } catch (err) {
+    console.error("Error fetching teacher usage: ", err);
+    return 0;
+  }
+};
+
+const formatDateString = (date, endOfDay = false) => {
+  if (!date) return '';
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day} ${endOfDay ? '23:59:59' : '00:00:00'}`;
+};
 
 const EventsClubsPage = () => {
   const [activeTab, setActiveTab] = useState('events');
@@ -20,6 +49,13 @@ const EventsClubsPage = () => {
   const [imageUrls, setImageUrls] = useState({});
   const storage = getStorage();
   const imageUrlsRef = useRef({});
+  const [teachers, setTeachers] = useState([]);
+  const [usage, setUsage] = useState({});
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageStart, setUsageStart] = useState('');
+  const [usageEnd, setUsageEnd] = useState('');
+  const [usageStartDate, setUsageStartDate] = useState(null);
+  const [usageEndDate, setUsageEndDate] = useState(null);
 
   const getImageURL = useCallback(async (imagePath) => {
     if (imageUrlsRef.current[imagePath]) return;
@@ -73,6 +109,7 @@ const EventsClubsPage = () => {
   };
 
   const fetchItems = useCallback(async () => {
+    if (activeTab === "Scan Usage") return; // Don't fetch items for Scan Usage tab
     try {
       setLoading(true);
       const collectionRef = collection(db, activeTab);
@@ -95,6 +132,38 @@ const EventsClubsPage = () => {
   useEffect(() => {
     fetchItems();
   }, [fetchItems]);
+
+  // Fetch unique teacher names for Scan Usage tab
+  useEffect(() => {
+    if (activeTab !== "Scan Usage") return;
+    const fetchTeachers = async () => {
+      setUsageLoading(true);
+      const collectionRef = collection(db, "student_check-in_datalogs");
+      const snapshot = await getDocs(collectionRef);
+      const teacherSet = new Set();
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        if (data.teacher) teacherSet.add(data.teacher);
+      });
+      setTeachers(Array.from(teacherSet));
+      setUsageLoading(false);
+    };
+    fetchTeachers();
+  }, [activeTab]);
+
+  // Fetch usage counts for all teachers
+  const fetchUsage = async () => {
+    if (!usageStartDate || !usageEndDate) return;
+    setUsageLoading(true);
+    const startStr = formatDateString(usageStartDate, false);
+    const endStr = formatDateString(usageEndDate, true);
+    const results = {};
+    for (const teacher of teachers) {
+      results[teacher] = await getTeacherUseCount(teacher, startStr, endStr);
+    }
+    setUsage(results);
+    setUsageLoading(false);
+  };
 
   const handleAddItem = async (e) => {
     e.preventDefault();
@@ -220,11 +289,73 @@ const EventsClubsPage = () => {
           <Nav.Item><Nav.Link eventKey="athletics">Athletics</Nav.Link></Nav.Item>
           <Nav.Item><Nav.Link eventKey="tutor">Tutors</Nav.Link></Nav.Item>
           <Nav.Item><Nav.Link eventKey="event_participants">Id List</Nav.Link></Nav.Item>
+          <Nav.Item><Nav.Link eventKey="Scan Usage">Scan Usage</Nav.Link></Nav.Item>
         </Nav>
-        <Button variant="success" onClick={() => handleOpenModal()}>Add Item</Button>
+        {activeTab !== "event_participants" && activeTab !== "Scan Usage" && (
+          <Button variant="success" onClick={() => handleOpenModal()}>Add Item</Button>
+        )}
       </div>
 
-      {loading ? (
+      {activeTab === "Scan Usage" ? (
+        <div>
+          <h2 className="my-4 text-center">Teacher Scan Usage</h2>
+          <Form className="mb-3 d-flex flex-wrap gap-2 justify-content-center align-items-end">
+            <Form.Group>
+              <Form.Label>Start Date</Form.Label>
+              <div>
+                <DatePicker
+                  selected={usageStartDate}
+                  onChange={date => setUsageStartDate(date)}
+                  dateFormat="yyyy-MM-dd"
+                  placeholderText="Select start date"
+                  className="form-control"
+                  maxDate={usageEndDate || undefined}
+                  isClearable
+                />
+              </div>
+            </Form.Group>
+            <Form.Group>
+              <Form.Label>End Date</Form.Label>
+              <div>
+                <DatePicker
+                  selected={usageEndDate}
+                  onChange={date => setUsageEndDate(date)}
+                  dateFormat="yyyy-MM-dd"
+                  placeholderText="Select end date"
+                  className="form-control"
+                  minDate={usageStartDate || undefined}
+                  isClearable
+                />
+              </div>
+            </Form.Group>
+            <Button variant="primary" onClick={fetchUsage} disabled={usageLoading || !usageStartDate || !usageEndDate}>
+              {usageLoading ? <Spinner animation="border" size="sm" /> : "Fetch Usage"}
+            </Button>
+          </Form>
+          <div>
+            {usageLoading ? (
+              <Spinner animation="border" />
+            ) : (
+              <table className="table table-bordered">
+                <thead>
+                  <tr>
+                    <th>Teacher</th>
+                    <th>Check-in Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {teachers.map(teacher => (
+                    <tr key={teacher}>
+                      <td>{teacher}</td>
+                      <td>{usage[teacher] ?? '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      ) : loading ? (
         <div className="d-flex justify-content-center align-items-center" style={{ height: "50vh" }}>
           <Spinner animation="border" variant="primary" />
         </div>

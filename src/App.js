@@ -2,10 +2,11 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   db, collection, getDocs, addDoc, deleteDoc, doc, updateDoc, arrayUnion, getDoc, setDoc
 } from './firebase';
+import { getAuth, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { getStorage, ref, getDownloadURL } from "firebase/storage";
 import 'bootstrap/dist/css/bootstrap.min.css';
 import {
-  Container, Row, Col, Card, Button, Spinner, Form, Modal, Nav
+  Container, Row, Col, Card, Button, Spinner, Form, Modal, Nav, Navbar
 } from 'react-bootstrap';
 import { query, where } from "firebase/firestore";
 import DatePicker from "react-datepicker";
@@ -14,12 +15,17 @@ import "react-datepicker/dist/react-datepicker.css";
 
 const getTeacherUseCount = async (teacherName, startDate, endDate) => {
   const collectionRef = collection(db, "student_check-in_datalogs");
+  console.log("Querying for:", teacherName, startDate, endDate);
   const q = query(
     collectionRef,
     where("teacher", "==", teacherName),
     where("timestamp", ">=", startDate),
     where("timestamp", "<=", endDate)
   );
+  // const q = query(
+  //   collectionRef,
+  //   where("teacher", "==", teacherName)
+  // );
   try {
     const snapshot = await getDocs(q);
     return snapshot.size;
@@ -52,10 +58,14 @@ const EventsClubsPage = () => {
   const [teachers, setTeachers] = useState([]);
   const [usage, setUsage] = useState({});
   const [usageLoading, setUsageLoading] = useState(false);
-  const [usageStart, setUsageStart] = useState('');
-  const [usageEnd, setUsageEnd] = useState('');
   const [usageStartDate, setUsageStartDate] = useState(null);
   const [usageEndDate, setUsageEndDate] = useState(null);
+  const [user, setUser] = useState(null);
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const auth = getAuth();
 
   const getImageURL = useCallback(async (imagePath) => {
     if (imageUrlsRef.current[imagePath]) return;
@@ -277,8 +287,83 @@ const EventsClubsPage = () => {
     activeTab === "event_participants" && bulkIds ? handleBulkAdd(e) : handleAddItem(e);
   };
 
+  // Auth state listener
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged(setUser);
+    return () => unsubscribe();
+  }, [auth]);
+
+  const handleSignIn = async (e) => {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthError('');
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (err) {
+      setAuthError('Invalid email or password.');
+    }
+    setAuthLoading(false);
+  };
+
+  const handleSignOut = async () => {
+    await signOut(auth);
+  };
+
+  if (!user) {
+    return (
+      <Container className="d-flex flex-column justify-content-center align-items-center" style={{ minHeight: "100vh" }}>
+        <Card className="p-4 shadow" style={{ maxWidth: 400, width: "100%" }}>
+          <h2 className="mb-3 text-center">Sign In</h2>
+          <Form onSubmit={handleSignIn}>
+            <Form.Group className="mb-3" controlId="formEmail">
+              <Form.Label>Email</Form.Label>
+              <Form.Control
+                type="email"
+                autoComplete="username"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+                disabled={authLoading}
+              />
+            </Form.Group>
+            <Form.Group className="mb-3" controlId="formPassword">
+              <Form.Label>Password</Form.Label>
+              <Form.Control
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                required
+                disabled={authLoading}
+              />
+            </Form.Group>
+            {authError && <div className="text-danger mb-2">{authError}</div>}
+            <Button variant="primary" type="submit" className="w-100" disabled={authLoading}>
+              {authLoading ? <Spinner animation="border" size="sm" /> : "Sign In"}
+            </Button>
+          </Form>
+        </Card>
+      </Container>
+    );
+  }
+
   return (
     <Container className="position-relative">
+      <Navbar bg="light" expand="lg" className="mb-3">
+        <Container>
+          <Navbar.Brand>Event Editor</Navbar.Brand>
+          <Navbar.Toggle />
+          <Navbar.Collapse className="justify-content-end">
+            <Navbar.Text>
+              Signed in as: <b>{user.email}</b>
+            </Navbar.Text>
+            <Button variant="outline-danger" size="sm" className="ms-3" onClick={handleSignOut}>
+              Sign Out
+            </Button>
+          </Navbar.Collapse>
+        </Container>
+      </Navbar>
+
       <h1 className="text-center my-4">Manage Events & Clubs</h1>
 
       <div className="d-flex justify-content-between align-items-center mb-3">
